@@ -7,25 +7,30 @@ import sys
 import warnings
 import grpc
 from concurrent import futures
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
 
 
 class Hotel():
-    def __init__(self, HId, HLat, HLon):
+    def __init__(self, HId, HLat, HLon, HRate, HPrice):
         self.HId=HId
         self.HLat=HLat
         self.HLon=HLon
+        self.HRate=HRate
+        self.HPrice=HPrice
 
 
 def loadRecommendations():
-    with open('hotels.json') as json_file:
-        data = json.load(json_file)
+    uri = "mongodb+srv://suvenjagtiani:<password>@cluster0.oxqritw.mongodb.net/?retryWrites=true&w=majority"
+    client = MongoClient(uri, server_api=ServerApi('1'))
+    db = client["Hotel_Reservation"]
+    table = db["recommendation"]
     hotels=[]
-    for hotel in data:
-        new_hotel = Hotel(hotel["id"], hotel["address"]["lat"], hotel["address"]["lon"])
+    for hotel in table.find():
+        new_hotel = Hotel(hotel["id"], hotel["lat"], hotel["lon"], hotel["rate"], hotel["price"])
         hotels.append(new_hotel)
-    return hotels
-
-
+    client.close()
+    return hotels        
 
 
 class RecommendationService(recommend_pb2_grpc.RecommendationServicer):
@@ -46,6 +51,22 @@ class RecommendationService(recommend_pb2_grpc.RecommendationServicer):
                 p_hotel = (hotel.HLat, hotel.HLon)
                 distance = GD(p_user, p_hotel).km
                 if (distance==min_distance):
+                    res_ids.append(hotel.HId)
+        elif (request.require=="rate"):
+            max_rate = 0
+            for hotel in self.hotels:
+                if (hotel.HRate > max_rate):
+                    max_rate = hotel.HRate
+            for hotel in self.hotels:
+                if (hotel.HRate==max_rate):
+                    res_ids.append(hotel.HId)
+        elif (request.require=="price"):
+            min_price = sys.float_info.max
+            for hotel in self.hotels:
+                if (hotel.HPrice < min_price):
+                    min_price=hotel.HPrice
+            for hotel in self.hotels:
+                if (hotel.HPrice==min_price):
                     res_ids.append(hotel.HId)
         else:
             warnings.warn(f"Wrong require parameter: {request.require}")
