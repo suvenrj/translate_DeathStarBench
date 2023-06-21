@@ -1,5 +1,3 @@
-import recommend_pb2_grpc
-from recommend_pb2 import Result
 import json
 from geopy.distance import geodesic as GD
 import math
@@ -7,35 +5,47 @@ import sys
 import warnings
 import grpc
 from concurrent import futures
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
+from mongoengine import *
+
+sys.path.insert(1, '/Users/suvenjagtiani/Desktop/hotel_recommend')
+
+from cmd.db import *
+from recommendation.recommend_pb2_grpc import *
+from recommendation.recommend_pb2 import Result
+
+# class Hotel():
+#     def __init__(self, HId, HLat, HLon, HRate, HPrice):
+#         self.HId=HId
+#         self.HLat=HLat
+#         self.HLon=HLon
+#         self.HRate=HRate
+#         self.HPrice=HPrice
 
 
-class Hotel():
-    def __init__(self, HId, HLat, HLon, HRate, HPrice):
-        self.HId=HId
-        self.HLat=HLat
-        self.HLon=HLon
-        self.HRate=HRate
-        self.HPrice=HPrice
-
-
-def loadRecommendations():
-    uri = "mongodb+srv://suvenjagtiani:<password>@cluster0.oxqritw.mongodb.net/?retryWrites=true&w=majority"
-    client = MongoClient(uri, server_api=ServerApi('1'))
-    db = client["Hotel_Reservation"]
-    table = db["recommendation"]
+def loadRecommendations(session):
     hotels=[]
-    for hotel in table.find():
-        new_hotel = Hotel(hotel["id"], hotel["lat"], hotel["lon"], hotel["rate"], hotel["price"])
-        hotels.append(new_hotel)
-    client.close()
+    for hotel in Hotel.objects:
+        hotels.append(hotel)
     return hotels        
 
 
-class RecommendationService(recommend_pb2_grpc.RecommendationServicer):
-    def __init__(self, hotels=[]):
+class RecommendationService(RecommendationServicer):
+    def __init__(self, mongo_session, port, ip, hotels=[]):
         self.hotels=hotels
+        self.MongoSession = mongo_session
+        self.Port=port
+        self.IpAddr=ip
+    
+    def serve(self):
+        server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
+        if (not self.hotels):
+            self.hotels = loadRecommendations(self.MongoSession)
+        add_RecommendationServicer_to_server(
+            self, server
+        )
+        server.add_insecure_port(self.IpAddr+":"+self.Port)
+        server.start()
+        server.wait_for_termination()
 
     def GetRecommendations(self, request, context):
         res_ids = []
@@ -71,22 +81,3 @@ class RecommendationService(recommend_pb2_grpc.RecommendationServicer):
         else:
             warnings.warn(f"Wrong require parameter: {request.require}")
         return Result(HotelIds=res_ids)
-
-        
-
-
-def serve():
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
-    service = RecommendationService()
-    if (not service.hotels):
-        service.hotels = loadRecommendations()
-    recommend_pb2_grpc.add_RecommendationServicer_to_server(
-        service, server
-    )
-    server.add_insecure_port("[::]:50051")
-    server.start()
-    server.wait_for_termination()
-
-
-if __name__ == "__main__":
-    serve()
